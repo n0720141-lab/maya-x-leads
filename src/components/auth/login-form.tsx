@@ -243,14 +243,14 @@ export function LoginForm() {
       {/*  RIGHT FORM AREA                                              */}
       {/* ============================================================ */}
       <main className="flex w-full flex-col bg-[#0F1117] lg:w-[60%]">
-        {/* Top bar header */}
+        {/* Top navigation */}
         <div className="flex items-center justify-between px-6 pt-6 sm:px-10 lg:px-14">
           <button
             type="button"
             onClick={() => setPage('home')}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-white/50 hover:text-white transition-colors bg-white/[0.05] hover:bg-white/[0.1] px-3 py-1.5 rounded-lg border border-white/10"
+            className="inline-flex items-center gap-2 text-sm text-white/50 hover:text-white transition-colors cursor-pointer"
           >
-            &larr; Back to Main Website
+            ← Back to Home
           </button>
           <span className="text-sm text-white/40">
             Don&apos;t have an account?{' '}

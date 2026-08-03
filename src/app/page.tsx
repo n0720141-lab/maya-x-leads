@@ -132,10 +132,23 @@ export default function Home() {
     hydrate()
     const syncPageFromUrl = () => {
       if (typeof window !== 'undefined') {
+        const state = useAppStore.getState()
         const params = new URLSearchParams(window.location.search)
         const pageParam = params.get('page')
-        if (pageParam) {
-          useAppStore.getState().setPage(pageParam as any)
+
+        if (state.isAuthenticated || state.isSuperAdmin) {
+          // Logged in user: if no pageParam or page is home/login/signup, auto-open dashboard
+          if (!pageParam || pageParam === 'home' || pageParam === 'login' || pageParam === 'signup') {
+            useAppStore.setState({ currentPage: 'dashboard' })
+          } else if (pageParam && state.currentPage !== pageParam) {
+            useAppStore.setState({ currentPage: pageParam as any })
+          }
+        } else {
+          // Guest visitor: fallback to home
+          const target = (pageParam || 'home') as any
+          if (state.currentPage !== target) {
+            useAppStore.setState({ currentPage: target })
+          }
         }
       }
     }
@@ -147,9 +160,10 @@ export default function Home() {
   const isAuthPage = currentPage === 'login' || currentPage === 'signup'
   const isHome = currentPage === 'home'
   const isSaLoginPage = currentPage === 'super-admin-login'
-  const isPublicPage = isHome || isAuthPage || currentPage === 'reviews' || isSaLoginPage
 
-  if (isPublicPage || (!isAuthenticated && !isSuperAdmin)) {
+  const isGuestPublicPage = (isHome || isAuthPage || currentPage === 'reviews' || isSaLoginPage) && !isAuthenticated && !isSuperAdmin
+
+  if (isGuestPublicPage || (!isAuthenticated && !isSuperAdmin)) {
     return <PageWithErrorBoundary />
   }
 

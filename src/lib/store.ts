@@ -138,8 +138,13 @@ export const useAppStore = create<AppState>()(
         set({ currentPage: page })
         if (typeof window !== 'undefined') {
           const url = new URL(window.location.href)
-          if (url.searchParams.get('page') !== page) {
-            url.searchParams.set('page', page)
+          const currentParam = url.searchParams.get('page') || 'home'
+          if (currentParam !== page) {
+            if (page === 'home') {
+              url.searchParams.delete('page')
+            } else {
+              url.searchParams.set('page', page)
+            }
             window.history.pushState({ page }, '', url.toString())
           }
         }

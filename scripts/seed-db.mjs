@@ -3,10 +3,32 @@ import { PrismaClient } from '@prisma/client'
 const db = new PrismaClient()
 
 async function main() {
-  const tenant = await db.tenant.findFirst()
+  let tenant = await db.tenant.findFirst()
   if (!tenant) {
-    console.log('No tenant found!')
-    return
+    tenant = await db.tenant.create({
+      data: {
+        name: 'Demo Dealership',
+        slug: 'demo-dealership',
+        email: 'owner@demo.com',
+        plan: 'growth',
+        status: 'active',
+      },
+    })
+    // Create owner user with scrypt hash
+    const crypto = await import('node:crypto')
+    const salt = crypto.randomBytes(16).toString('hex')
+    const derivedKey = crypto.scryptSync('123456', salt, 64, { N: 16384, r: 8, p: 1 })
+    const passwordHash = `${salt}:${derivedKey.toString('hex')}`
+
+    await db.user.create({
+      data: {
+        email: 'owner@demo.com',
+        passwordHash,
+        name: 'Demo Owner',
+        role: 'owner',
+        tenantId: tenant.id,
+      },
+    })
   }
 
   const tenantId = tenant.id

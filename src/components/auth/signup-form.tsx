@@ -417,7 +417,15 @@ export function SignupForm() {
     if (step > 1) {
       setStep(step - 1)
     } else {
-      setPage('home')
+      try {
+        useAppStore.getState().setPage('home')
+      } catch {}
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href)
+        url.searchParams.set('page', 'home')
+        window.history.pushState({}, '', url.toString())
+        window.dispatchEvent(new Event('popstate'))
+      }
     }
   }
 
@@ -649,10 +657,10 @@ export function SignupForm() {
               <Button
                 type="button"
                 onClick={handleBack}
-                className="h-11 px-6 bg-[#2A2F3D] hover:bg-[#363D50] text-white rounded-lg transition-all hover:-translate-y-0.5 active:translate-y-0"
+                className="h-11 px-6 bg-[#2A2F3D] hover:bg-[#363D50] text-white rounded-lg cursor-pointer"
               >
                 <ArrowLeft className="w-4 h-4 mr-2" />
-                {step === 1 ? 'Back to Website' : 'Back'}
+                Back
               </Button>
               <Button
                 type="button"
@@ -1087,14 +1095,15 @@ export function SignupForm() {
       {/* Right Content Area */}
       <main className="flex-1 bg-[#0F1117] flex flex-col min-h-screen overflow-y-auto">
         <div className="flex-1 flex flex-col w-full max-w-3xl mx-auto px-5 sm:px-8 py-8 lg:py-10">
-          {/* Already have account */}
-          <div className="flex justify-between items-center mb-6">
+          {/* Top navigation */}
+          <div className="flex items-center justify-between mb-6">
             <button
               type="button"
-              onClick={() => setPage('home')}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-400 hover:text-white transition-colors bg-white/[0.05] hover:bg-white/[0.1] px-3 py-1.5 rounded-lg border border-white/10"
+              onClick={handleBack}
+              className="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors cursor-pointer"
             >
-              &larr; Back to Main Website
+              <ArrowLeft className="w-4 h-4" />
+              Back to Home
             </button>
             <p className="text-sm text-gray-400">
               Already have an account?{' '}

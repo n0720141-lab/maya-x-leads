@@ -1,0 +1,289 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ===================== TENANT =====================
+model Tenant {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique
+  email         String
+  phone         String?
+  address       String?
+  logo          String?
+  plan          String   @default("starter") // starter, growth, enterprise
+  stripeCustomerId  String?
+  stripeSubscriptionId String?
+  status        String   @default("active") // active, suspended, cancelled
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  users         User[]
+  leads         Lead[]
+  conversations Conversation[]
+  campaigns     Campaign[]
+  botConfig     BotConfig?
+  questions     Question[]
+  channels      Channel[]
+  webhookConfig WebhookConfig?
+  subscriptions Subscription[]
+  usageLogs     UsageLog[]
+  dncList       DncList[]
+  messageQueues MessageQueue[]
+}
+
+// ===================== USER =====================
+model User {
+  id            String   @id @default(cuid())
+  email         String
+  passwordHash  String
+  name          String
+  role          String   @default("agent") // owner, agent
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([email, tenantId])
+}
+
+// ===================== LEAD =====================
+model Lead {
+  id            String   @id @default(cuid())
+  phone         String
+  name          String?
+  email         String?
+  status        String   @default("new") // new, contacted, replied, qualified, appointment_set, won, lost, dnc
+  source        String   @default("manual") // google_sheet, manual, import, campaign
+  channel       String   @default("sms") // sms, whatsapp, email
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  campaignId    String?
+  conversation  Conversation?
+  answers       String?  // JSON: { vehicle: "...", income: "..." }
+  notes         String?  // JSON: ["note1", "note2"]
+  appointmentDate DateTime?
+  port          String?  // SIM port for sticky port
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ===================== CONVERSATION =====================
+model Conversation {
+  id            String   @id @default(cuid())
+  leadId        String   @unique
+  lead          Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  channel       String   @default("sms")
+  activeChannel String?  // current active channel: sms, whatsapp, email
+  messages      String   // JSON array of { direction, text, timestamp, channel }
+  state         String   @default("IDLE") // IDLE, ASK_VEHICLE, ASK_INCOME, DONE
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  msgRecords    Message[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ===================== CAMPAIGN =====================
+model Campaign {
+  id            String   @id @default(cuid())
+  name          String
+  channel       String   @default("sms") // sms, whatsapp, email, all
+  status        String   @default("draft") // draft, active, paused, completed
+  messageTemplate String? // JSON or text template
+  leadSource    String?  // google_sheet_id or "manual"
+  leadsEnrolled Int      @default(0)
+  repliesCount  Int      @default(0)
+  qualifiedCount Int     @default(0)
+  appointmentsCount Int   @default(0)
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ===================== BOT CONFIG =====================
+model BotConfig {
+  id            String   @id @default(cuid())
+  tenantId      String   @unique
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  botName       String   @default("Maya")
+  language      String   @default("en")
+  role          String   @default("Online Sales Assistant")
+  timezone      String   @default("America/Toronto")
+  personality   String   @default("Friendly & Professional")
+  tone          String   @default("Conversational")
+  openingMessage String  @default("")
+  instructions  String   @default("")
+  knowledgeBase String   @default("")
+  aiProvider    String   @default("deepseek")
+  aiApiKey      String?
+  responseDelayMs Int     @default(3000)
+  followUpDelayMs  Int    @default(300000) // 5 min
+  followUpMaxAttempts Int @default(1)
+  sessionTimeoutMs  Int   @default(1800000) // 30 min
+  maxQuestions  Int      @default(10)
+  status        String   @default("active")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ===================== QUESTION =====================
+model Question {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  text          String
+  internalName  String?
+  type          String   @default("text") // text, multiple_choice, number, email
+  options       String?  // JSON array for multiple choice
+  required      Boolean  @default(true)
+  order         Int      @default(0)
+  conditionQuestionId String? // show only if this question's answer matches
+  conditionValue String?
+  status        String   @default("active")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ===================== CHANNEL =====================
+model Channel {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  type          String   // sms, whatsapp, email, voice, facebook, instagram
+  name          String
+  status        String   @default("disconnected") // connected, needs_attention, disconnected
+  credentials   String   // encrypted JSON: { host, port, user, pass, phone, ... }
+  phone         String?
+  email         String?
+  connectedOn   DateTime?
+  lastHealthCheck DateTime?
+  messages7d    Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ===================== WEBHOOK CONFIG =====================
+model WebhookConfig {
+  id            String   @id @default(cuid())
+  tenantId      String   @unique
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  url           String
+  apiKey        String?
+  format        String   @default("json")
+  timeout       Int      @default(30)
+  retryAttempts Int      @default(3)
+  events        String   @default("[]") // JSON array of enabled event names
+  status        String   @default("active")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ===================== SUBSCRIPTION =====================
+model Subscription {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan          String   @default("starter")
+  amount        Float    @default(0)
+  currency      String   @default("usd")
+  status        String   @default("active") // active, past_due, cancelled
+  stripeSubId   String?
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  leadsLimit    Int      @default(100)
+  messagesLimit Int     @default(1000)
+  aiMessagesLimit Int   @default(500)
+  agentSeats    Int      @default(1)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ===================== USAGE LOG =====================
+model UsageLog {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  type          String   // lead_imported, message_sent, message_received, ai_interaction
+  count         Int      @default(1)
+  date          DateTime @default(now())
+  createdAt     DateTime @default(now())
+}
+
+// ===================== DNC LIST =====================
+model DncList {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  phone         String
+  reason        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([tenantId, phone])
+}
+
+// ===================== SUPER ADMIN =====================
+model SuperAdmin {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  name          String
+  role          String   @default("super_admin") // super_admin, viewer
+  lastLoginAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ===================== GLOBAL CONFIG =====================
+model GlobalConfig {
+  id            String   @id @default(cuid())
+  key           String   @unique
+  value         String
+  description   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ===================== MESSAGE =====================
+model Message {
+  id            String   @id @default(cuid())
+  conversationId String
+  conversation  Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  direction     String   // inbound, outbound
+  content       String
+  senderType    String   @default("ai") // ai, human, lead
+  senderName    String?
+  channel       String   @default("sms")
+  status        String   @default("sent") // pending, sent, delivered, failed
+  metadata      String?  // JSON
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ===================== MESSAGE QUEUE =====================
+model MessageQueue {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversationId String?
+  leadId        String?
+  direction     String   // outbound
+  channel       String   @default("sms")
+  status        String   @default("pending") // pending, processing, sent, failed
+  content       String
+  stickyPort    String?  // SIM port for sticky reply
+  stickyNumber  String?  // SIM number for sticky reply
+  scheduledAt   DateTime?
+  sentAt        DateTime?
+  error         String?
+  retryCount    Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}

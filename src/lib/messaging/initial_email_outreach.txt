@@ -1,0 +1,13 @@
+Subject: Quick question {name}
+
+Hi {name},
+
+Hope you're having a good week. Reaching out regarding your vehicle inquiry.
+
+We work with a network of financing partners to help buyers explore flexible payment options for cars, trucks, and SUVs.
+
+Are you currently shopping for a specific make or model? Reply back with what you're looking for and I'll check available options for you.
+
+Best regards,
+
+Sarah

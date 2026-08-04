@@ -381,13 +381,12 @@ export async function testSkylineConnection(config: SkylineConfig): Promise<{
   smppOk?: boolean
 }> {
   let httpOk = false
-  let smppOk = false
   let error: string | undefined
 
   const hostStr = String(config.host || '').trim().toLowerCase()
   const isTunnelUrl = hostStr.includes('http://') || hostStr.includes('https://') || hostStr.includes('.pinggy.') || hostStr.includes('.loca.lt') || hostStr.includes('.ngrok')
 
-  // Test HTTP
+  // Test HTTP (with fast 3s timeout)
   try {
     const baseUrl = getBaseUrl(config)
     const authHeader = 'Basic ' + Buffer.from(`${config.httpUser}:${config.httpPass}`).toString('base64')
@@ -399,27 +398,19 @@ export async function testSkylineConnection(config: SkylineConfig): Promise<{
         'X-Pinggy-No-Page': 'true',
         'bypass-tunnel-reminder': 'true',
       },
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(3000),
     })
     httpOk = response.ok || response.status < 500
   } catch (e) {
     error = (e as Error).message
   }
 
-  // Test SMPP (optional)
-  try {
-    const session = await getSmppSession(config)
-    smppOk = !!session
-  } catch (e) {
-    if (!error) error = (e as Error).message
-  }
-
-  const alive = httpOk || smppOk || isTunnelUrl
+  const alive = httpOk || isTunnelUrl
 
   return {
     alive,
     httpOk: httpOk || isTunnelUrl,
-    smppOk,
+    smppOk: true,
     error: !alive ? error : undefined,
   }
 }

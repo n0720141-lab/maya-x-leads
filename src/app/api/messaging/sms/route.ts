@@ -43,13 +43,6 @@ export async function POST(req: NextRequest) {
           smppPass: body.smppPass || 'Sign4321',
         }
 
-        // Try quick ping if possible, but fallback to instant save so Vercel never times out
-        let isRealAlive = false
-        try {
-          const realResult = await testSkylineConnection(config)
-          isRealAlive = realResult.alive
-        } catch {}
-
         const credentials = JSON.stringify(config)
 
         const channel = channelId

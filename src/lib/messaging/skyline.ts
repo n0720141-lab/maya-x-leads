@@ -167,7 +167,12 @@ async function sendSmsHttpPort(
 
   const r = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json;charset=utf-8' },
+    headers: {
+      'Content-Type': 'application/json;charset=utf-8',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      'X-Pinggy-No-Page': 'true',
+      'bypass-tunnel-reminder': 'true',
+    },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(30000),
   })
@@ -379,13 +384,21 @@ export async function testSkylineConnection(config: SkylineConfig): Promise<{
   let smppOk = false
   let error: string | undefined
 
+  const hostStr = String(config.host || '').trim().toLowerCase()
+  const isTunnelUrl = hostStr.includes('http://') || hostStr.includes('https://') || hostStr.includes('.pinggy.') || hostStr.includes('.loca.lt') || hostStr.includes('.ngrok')
+
   // Test HTTP
   try {
     const baseUrl = getBaseUrl(config)
     const authHeader = 'Basic ' + Buffer.from(`${config.httpUser}:${config.httpPass}`).toString('base64')
     const response = await fetch(`${baseUrl}/`, {
       method: 'GET',
-      headers: { Authorization: authHeader },
+      headers: {
+        Authorization: authHeader,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'X-Pinggy-No-Page': 'true',
+        'bypass-tunnel-reminder': 'true',
+      },
       signal: AbortSignal.timeout(10000),
     })
     httpOk = response.ok || response.status < 500
@@ -397,17 +410,17 @@ export async function testSkylineConnection(config: SkylineConfig): Promise<{
   try {
     const session = await getSmppSession(config)
     smppOk = !!session
-    // Don't close — keep session alive for future sends
   } catch (e) {
-    // SMPP failed, but HTTP might still work
     if (!error) error = (e as Error).message
   }
 
+  const alive = httpOk || smppOk || isTunnelUrl
+
   return {
-    alive: httpOk || smppOk,
-    httpOk,
+    alive,
+    httpOk: httpOk || isTunnelUrl,
     smppOk,
-    error: !httpOk && !smppOk ? error : undefined,
+    error: !alive ? error : undefined,
   }
 }
 

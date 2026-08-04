@@ -24,6 +24,14 @@ export interface SendSmsResult {
   method?: 'http' | 'smpp' | 'send_node'
 }
 
+export function getBaseUrl(config: SkylineConfig): string {
+  const host = String(config.host || '').trim()
+  if (host.startsWith('http://') || host.startsWith('https://')) {
+    return host.replace(/\/+$/, '')
+  }
+  return `http://${host}:${config.httpPort || 80}`
+}
+
 // ==================== SMPP SESSION MANAGEMENT ====================
 // Single SMPP session per config — reused for all sends
 interface SmppSessionState {
@@ -134,8 +142,9 @@ async function sendSmsHttpPort(
   text: string,
   fromPort: string,
 ): Promise<{ ok: boolean; tid: number; raw?: string }> {
+  const baseUrl = getBaseUrl(config)
   const url =
-    `http://${config.host}:${config.httpPort}/goip_post_sms.html` +
+    `${baseUrl}/goip_post_sms.html` +
     `?username=${encodeURIComponent(config.httpUser)}` +
     `&password=${encodeURIComponent(config.httpPass)}` +
     `&version=1.1`
@@ -372,8 +381,9 @@ export async function testSkylineConnection(config: SkylineConfig): Promise<{
 
   // Test HTTP
   try {
+    const baseUrl = getBaseUrl(config)
     const authHeader = 'Basic ' + Buffer.from(`${config.httpUser}:${config.httpPass}`).toString('base64')
-    const response = await fetch(`http://${config.host}:${config.httpPort}/`, {
+    const response = await fetch(`${baseUrl}/`, {
       method: 'GET',
       headers: { Authorization: authHeader },
       signal: AbortSignal.timeout(10000),

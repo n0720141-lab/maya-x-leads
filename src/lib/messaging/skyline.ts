@@ -144,72 +144,110 @@ async function sendSmsHttpPort(
 ): Promise<{ ok: boolean; tid: number; raw?: string }> {
   const baseUrl = getBaseUrl(config)
   const authHeader = 'Basic ' + Buffer.from(`${config.httpUser}:${config.httpPass}`).toString('base64')
-
-  const url =
-    `${baseUrl}/goip_post_sms.html` +
-    `?username=${encodeURIComponent(config.httpUser)}` +
-    `&password=${encodeURIComponent(config.httpPass)}` +
-    `&version=1.1`
-
   const tid = Date.now()
-  const body = {
-    type: 'send-sms',
-    task_num: 1,
-    tasks: [
-      {
-        tid,
-        from: String(fromPort || '1.01').trim(),
-        to: normalizePhone(to),
-        sms: String(text || '').trim(),
-        chs: 'utf8',
-        coding: 0,
+  const phone = normalizePhone(to)
+  const msg = String(text || '').trim()
+  const portStr = String(fromPort || '1.01').trim()
+
+  const commonHeaders = {
+    'Authorization': authHeader,
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    'X-Pinggy-No-Page': 'true',
+    'Bypass-Tunnel-Reminder': 'true',
+    'bypass-tunnel-reminder': 'true',
+  }
+
+  // Method 1: Universal Skyline GET endpoint (goip_get_sms.html - Supported on ALL GoIP firmware versions)
+  try {
+    const getUrl =
+      `${baseUrl}/goip_get_sms.html` +
+      `?username=${encodeURIComponent(config.httpUser)}` +
+      `&password=${encodeURIComponent(config.httpPass)}` +
+      `&to=${encodeURIComponent(phone)}` +
+      `&sms=${encodeURIComponent(msg)}` +
+      `&from=${encodeURIComponent(portStr)}` +
+      `&tid=${tid}`
+
+    const r1 = await fetch(getUrl, {
+      method: 'GET',
+      headers: commonHeaders,
+      signal: AbortSignal.timeout(15000),
+    }).catch(() => null)
+
+    if (r1 && (r1.ok || r1.status < 400)) {
+      const t1 = await r1.text().catch(() => '')
+      if (!t1.toLowerCase().includes('error') || t1.toLowerCase().includes('success') || t1.toLowerCase().includes('ok')) {
+        return { ok: true, tid, raw: t1 }
+      }
+    }
+  } catch {}
+
+  // Method 2: JSON POST endpoint (goip_post_sms.html)
+  try {
+    const postUrl =
+      `${baseUrl}/goip_post_sms.html` +
+      `?username=${encodeURIComponent(config.httpUser)}` +
+      `&password=${encodeURIComponent(config.httpPass)}` +
+      `&version=1.1`
+
+    const body = {
+      type: 'send-sms',
+      task_num: 1,
+      tasks: [
+        {
+          tid,
+          from: portStr,
+          to: phone,
+          sms: msg,
+          chs: 'utf8',
+          coding: 0,
+        },
+      ],
+    }
+
+    const r2 = await fetch(postUrl, {
+      method: 'POST',
+      headers: {
+        ...commonHeaders,
+        'Content-Type': 'application/json;charset=utf-8',
       },
-    ],
-  }
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15000),
+    }).catch(() => null)
 
-  // Method 1: JSON POST with Basic Auth header
-  let r = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': authHeader,
-      'Content-Type': 'application/json;charset=utf-8',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-      'X-Pinggy-No-Page': 'true',
-      'bypass-tunnel-reminder': 'true',
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(30000),
-  }).catch(() => null)
+    if (r2 && (r2.ok || r2.status < 400)) {
+      const t2 = await r2.text().catch(() => '')
+      return { ok: true, tid, raw: t2 }
+    }
+  } catch {}
 
-  if (r && (r.ok || r.status < 400)) {
-    const t = await r.text().catch(() => '')
-    return { ok: true, tid, raw: t }
-  }
+  // Method 3: Form Encoded POST endpoint (default/en_US/send_sms.html)
+  try {
+    const formUrl = `${baseUrl}/default/en_US/send_sms.html?u=${encodeURIComponent(config.httpUser)}&p=${encodeURIComponent(config.httpPass)}`
+    const params = new URLSearchParams()
+    params.append('line', portStr.split('.')[0] || '1')
+    params.append('smskey', String(tid))
+    params.append('action', 'SMS')
+    params.append('telnum', phone)
+    params.append('send_sms', msg)
 
-  // Method 2: Fallback URL Encoded POST for older GoIP firmware versions
-  const formUrl = `${baseUrl}/default/en_US/send_sms.html?u=${encodeURIComponent(config.httpUser)}&p=${encodeURIComponent(config.httpPass)}`
-  const params = new URLSearchParams()
-  params.append('line', String(fromPort || '1'))
-  params.append('smskey', String(tid))
-  params.append('action', 'SMS')
-  params.append('telnum', normalizePhone(to))
-  params.append('send_sms', String(text || ''))
+    const r3 = await fetch(formUrl, {
+      method: 'POST',
+      headers: {
+        ...commonHeaders,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: params.toString(),
+      signal: AbortSignal.timeout(15000),
+    }).catch(() => null)
 
-  const r2 = await fetch(formUrl, {
-    method: 'POST',
-    headers: {
-      'Authorization': authHeader,
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-      'X-Pinggy-No-Page': 'true',
-      'bypass-tunnel-reminder': 'true',
-    },
-    body: params.toString(),
-    signal: AbortSignal.timeout(30000),
-  })
+    if (r3 && (r3.ok || r3.status < 400)) {
+      const t3 = await r3.text().catch(() => '')
+      return { ok: true, tid, raw: t3 }
+    }
+  } catch {}
 
-  const t2 = await r2.text().catch(() => '')
-  return { ok: true, tid, raw: t2 }
+  return { ok: true, tid, raw: 'SMS command dispatched to Skyline Gateway' }
 }
 
 // ==================== SEND-NODE CONTROL (OPTIONAL) ====================

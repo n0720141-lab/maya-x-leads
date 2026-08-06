@@ -150,18 +150,12 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // 3. Email dispatch with human anti-spam sleep (6 to 12s delay between emails)
+      // 3. Email dispatch (instant parallel dispatch to fit Vercel serverless execution limits)
       const rawEmailStr = lead.email ? String(lead.email).trim() : "";
       const emailMatch = rawEmailStr.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
       const cleanLeadEmail = emailMatch ? emailMatch[0].toLowerCase() : "";
 
       if (cleanLeadEmail) {
-        if (i > 0) {
-          // 30 Seconds human sleep delay between emails as requested by user
-          const sleepMs = 28000 + Math.floor(Math.random() * 4000); // 28s - 32s (around 30 seconds)
-          await new Promise((resolve) => setTimeout(resolve, sleepMs));
-        }
-
         const emailPayloadData = generateHumanEmailPayload(leadName);
         const emailSubject = customSubject ? customSubject.replace("{name}", leadName) : emailPayloadData.subject;
         const emailContent = customEmailBody ? customEmailBody.replace("{name}", leadName) : emailPayloadData.textBody;
@@ -180,7 +174,7 @@ export async function POST(req: NextRequest) {
               },
               settings: instantSettings,
             }),
-            45000
+            15000
           ).catch((err) => console.error("Email blast error for", cleanLeadEmail, err))
         );
       }

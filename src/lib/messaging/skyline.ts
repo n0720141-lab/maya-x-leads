@@ -145,7 +145,11 @@ async function sendSmsHttpPort(
   const baseUrl = getBaseUrl(config)
   const authHeader = 'Basic ' + Buffer.from(`${config.httpUser}:${config.httpPass}`).toString('base64')
   const tid = Date.now()
-  const phone = normalizePhone(to)
+
+  const rawDigits = String(to || '').replace(/[^\d]/g, '')
+  const local10Phone = rawDigits.length >= 10 ? rawDigits.slice(-10) : rawDigits
+  const full11Phone = rawDigits.length === 10 ? '1' + rawDigits : (rawDigits.length >= 11 ? rawDigits.slice(-11) : rawDigits)
+
   const msg = String(text || '').trim()
   const portStr = String(fromPort || '1.01').trim()
 
@@ -157,87 +161,98 @@ async function sendSmsHttpPort(
     'bypass-tunnel-reminder': 'true',
   }
 
-  // Method 0: Client's Old System (send-node / intake-relay on port 3010 or HTTP bridge)
-  try {
-    const sendNodeUrl =
-      `${baseUrl}/send` +
-      `?key=19851985` +
-      `&port=${encodeURIComponent(portStr)}` +
-      `&to=${encodeURIComponent(phone)}` +
-      `&text=${encodeURIComponent(msg)}` +
-      `&ms=25000`
+  // Helper to test all target numbers (both 10-digit local e.g. 4165551234 and 11-digit national e.g. 14165551234)
+  const targetPhones = Array.from(new Set([local10Phone, full11Phone, `+${full11Phone}`])).filter(Boolean)
 
-    const r0 = await fetch(sendNodeUrl, {
-      method: 'GET',
-      headers: commonHeaders,
-      signal: AbortSignal.timeout(15000),
-    }).catch(() => null)
+  for (const phone of targetPhones) {
+    // Method 0: Client's Old System (send-node / intake-relay on port 3010 or HTTP bridge)
+    try {
+      const sendNodeUrl =
+        `${baseUrl}/send` +
+        `?key=19851985` +
+        `&port=${encodeURIComponent(portStr)}` +
+        `&to=${encodeURIComponent(phone)}` +
+        `&text=${encodeURIComponent(msg)}` +
+        `&ms=25000`
 
-    if (r0 && (r0.ok || r0.status < 400)) {
-      const t0 = await r0.text().catch(() => '')
-      if (t0.includes('ok') || t0.includes('success') || r0.status === 200) {
-        return { ok: true, tid, raw: t0 }
+      const r0 = await fetch(sendNodeUrl, {
+        method: 'GET',
+        headers: commonHeaders,
+        signal: AbortSignal.timeout(15000),
+      }).catch(() => null)
+
+      if (r0 && (r0.ok || r0.status < 400)) {
+        const t0 = await r0.text().catch(() => '')
+        if (t0.includes('ok') || t0.includes('success') || r0.status === 200) {
+          return { ok: true, tid, raw: t0 }
+        }
       }
-    }
-  } catch {}
+    } catch {}
 
-  // Method 1: Universal Skyline GET endpoint (goip_get_sms.html - Supported on ALL GoIP firmware versions)
-  try {
-    const getUrl =
-      `${baseUrl}/goip_get_sms.html` +
-      `?username=${encodeURIComponent(config.httpUser)}` +
-      `&password=${encodeURIComponent(config.httpPass)}` +
-      `&to=${encodeURIComponent(phone)}` +
-      `&sms=${encodeURIComponent(msg)}` +
-      `&from=${encodeURIComponent(portStr)}` +
-      `&tid=${tid}`
+    // Method 1: Universal Skyline GET endpoint (goip_get_sms.html)
+    try {
+      const getUrl =
+        `${baseUrl}/goip_get_sms.html` +
+        `?username=${encodeURIComponent(config.httpUser)}` +
+        `&password=${encodeURIComponent(config.httpPass)}` +
+        `&to=${encodeURIComponent(phone)}` +
+        `&sms=${encodeURIComponent(msg)}` +
+        `&from=${encodeURIComponent(portStr)}` +
+        `&tid=${tid}`
 
-    const r1 = await fetch(getUrl, {
-      method: 'GET',
-      headers: commonHeaders,
-      signal: AbortSignal.timeout(15000),
-    }).catch(() => null)
+      const r1 = await fetch(getUrl, {
+        method: 'GET',
+        headers: commonHeaders,
+        signal: AbortSignal.timeout(15000),
+      }).catch(() => null)
 
-    if (r1 && (r1.ok || r1.status < 400)) {
-      const t1 = await r1.text().catch(() => '')
-      if (!t1.toLowerCase().includes('error') || t1.toLowerCase().includes('success') || t1.toLowerCase().includes('ok')) {
-        return { ok: true, tid, raw: t1 }
+      if (r1 && (r1.ok || r1.status < 400)) {
+        const t1 = await r1.text().catch(() => '')
+        if (!t1.toLowerCase().includes('error') || t1.toLowerCase().includes('success') || t1.toLowerCase().includes('ok')) {
+          return { ok: true, tid, raw: t1 }
+        }
       }
-    }
-  } catch {}
+    } catch {}
 
-  // Method 2: JSON POST endpoint (goip_post_sms.html)
-  try {
-    const postUrl =
-      `${baseUrl}/goip_post_sms.html` +
-      `?username=${encodeURIComponent(config.httpUser)}` +
-      `&password=${encodeURIComponent(config.httpPass)}` +
-      `&version=1.1`
+    // Method 2: JSON POST endpoint (goip_post_sms.html)
+    try {
+      const postUrl =
+        `${baseUrl}/goip_post_sms.html` +
+        `?username=${encodeURIComponent(config.httpUser)}` +
+        `&password=${encodeURIComponent(config.httpPass)}` +
+        `&version=1.1`
 
-    const body = {
-      type: 'send-sms',
-      task_num: 1,
-      tasks: [
-        {
-          tid,
-          from: portStr,
-          to: phone,
-          sms: msg,
-          chs: 'utf8',
-          coding: 0,
+      const body = {
+        type: 'send-sms',
+        task_num: 1,
+        tasks: [
+          {
+            tid,
+            from: portStr,
+            to: phone,
+            sms: msg,
+            chs: 'utf8',
+            coding: 0,
+          },
+        ],
+      }
+
+      const r2 = await fetch(postUrl, {
+        method: 'POST',
+        headers: {
+          ...commonHeaders,
+          'Content-Type': 'application/json;charset=utf-8',
         },
-      ],
-    }
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15000),
+      }).catch(() => null)
 
-    const r2 = await fetch(postUrl, {
-      method: 'POST',
-      headers: {
-        ...commonHeaders,
-        'Content-Type': 'application/json;charset=utf-8',
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(15000),
-    }).catch(() => null)
+      if (r2 && (r2.ok || r2.status < 400)) {
+        const t2 = await r2.text().catch(() => '')
+        return { ok: true, tid, raw: t2 }
+      }
+    } catch {}
+  }
 
     if (r2 && (r2.ok || r2.status < 400)) {
       const t2 = await r2.text().catch(() => '')

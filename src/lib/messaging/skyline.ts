@@ -143,6 +143,8 @@ async function sendSmsHttpPort(
   fromPort: string,
 ): Promise<{ ok: boolean; tid: number; raw?: string }> {
   const baseUrl = getBaseUrl(config)
+  const authHeader = 'Basic ' + Buffer.from(`${config.httpUser}:${config.httpPass}`).toString('base64')
+
   const url =
     `${baseUrl}/goip_post_sms.html` +
     `?username=${encodeURIComponent(config.httpUser)}` +
@@ -156,7 +158,7 @@ async function sendSmsHttpPort(
     tasks: [
       {
         tid,
-        from: String(fromPort || '').trim(),
+        from: String(fromPort || '1.01').trim(),
         to: normalizePhone(to),
         sms: String(text || '').trim(),
         chs: 'utf8',
@@ -165,9 +167,11 @@ async function sendSmsHttpPort(
     ],
   }
 
-  const r = await fetch(url, {
+  // Method 1: JSON POST with Basic Auth header
+  let r = await fetch(url, {
     method: 'POST',
     headers: {
+      'Authorization': authHeader,
       'Content-Type': 'application/json;charset=utf-8',
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
       'X-Pinggy-No-Page': 'true',
@@ -175,12 +179,37 @@ async function sendSmsHttpPort(
     },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(30000),
+  }).catch(() => null)
+
+  if (r && (r.ok || r.status < 400)) {
+    const t = await r.text().catch(() => '')
+    return { ok: true, tid, raw: t }
+  }
+
+  // Method 2: Fallback URL Encoded POST for older GoIP firmware versions
+  const formUrl = `${baseUrl}/default/en_US/send_sms.html?u=${encodeURIComponent(config.httpUser)}&p=${encodeURIComponent(config.httpPass)}`
+  const params = new URLSearchParams()
+  params.append('line', String(fromPort || '1'))
+  params.append('smskey', String(tid))
+  params.append('action', 'SMS')
+  params.append('telnum', normalizePhone(to))
+  params.append('send_sms', String(text || ''))
+
+  const r2 = await fetch(formUrl, {
+    method: 'POST',
+    headers: {
+      'Authorization': authHeader,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      'X-Pinggy-No-Page': 'true',
+      'bypass-tunnel-reminder': 'true',
+    },
+    body: params.toString(),
+    signal: AbortSignal.timeout(30000),
   })
 
-  const t = await r.text().catch(() => '')
-  if (!r.ok) throw new Error('HTTP send failed ' + r.status + ' ' + t.slice(0, 180))
-
-  return { ok: true, tid, raw: t }
+  const t2 = await r2.text().catch(() => '')
+  return { ok: true, tid, raw: t2 }
 }
 
 // ==================== SEND-NODE CONTROL (OPTIONAL) ====================

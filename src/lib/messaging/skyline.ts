@@ -241,55 +241,64 @@ export async function sendSkylineSms(
     return { success: false, error: 'Empty message' }
   }
 
-  // Path 1: Sticky port → try send-node first (if configured), then HTTP direct
-  if (stickyPort) {
-    const port = String(stickyPort).trim()
+  // Primary HTTP send to Skyline GoIP (handles both sticky port and auto SIM selection)
+  const targetPort = (stickyPort && String(stickyPort).trim()) || '1.01'
 
-    // Try send-node first (it handles board-hold + force-switch)
-    if (sendNodeConfig) {
-      try {
-        await sendViaSendNode(sendNodeConfig.baseUrl, sendNodeConfig.secret, phone, msg, port)
-        return {
-          success: true,
-          messageId: `sn_${Date.now()}`,
-          port,
-          method: 'send_node',
-        }
-      } catch (e) {
-        console.warn(`[Skyline] send-node failed, trying direct HTTP:`, (e as Error).message)
-        // Fall through to direct HTTP
-      }
-    }
-
-    // Direct HTTP send to Skyline (force exact port)
+  // Try send-node first if configured
+  if (sendNodeConfig) {
     try {
-      const result = await sendSmsHttpPort(config, phone, msg, port)
+      await sendViaSendNode(sendNodeConfig.baseUrl, sendNodeConfig.secret, phone, msg, targetPort)
       return {
         success: true,
-        messageId: `http_${result.tid}`,
-        port,
-        method: 'http',
+        messageId: `sn_${Date.now()}`,
+        port: targetPort,
+        method: 'send_node',
       }
     } catch (e) {
-      console.warn(`[Skyline] HTTP send to port ${port} failed, trying SMPP fallback:`, (e as Error).message)
-      // Fall through to SMPP
+      console.warn(`[Skyline] send-node failed, trying direct HTTP:`, (e as Error).message)
     }
   }
 
-  // Path 2: SMPP send (fallback or no sticky port)
+  // Direct HTTP send to Skyline GoIP Endpoint
+  try {
+    const result = await sendSmsHttpPort(config, phone, msg, targetPort)
+    return {
+      success: true,
+      messageId: `http_${result.tid}`,
+      port: targetPort,
+      method: 'http',
+    }
+  } catch (e) {
+    console.warn(`[Skyline] Primary HTTP send to port ${targetPort} failed:`, (e as Error).message)
+  }
+
+  // Secondary HTTP fallback to port "1"
+  try {
+    const result = await sendSmsHttpPort(config, phone, msg, '1')
+    return {
+      success: true,
+      messageId: `http_${result.tid}`,
+      port: '1',
+      method: 'http',
+    }
+  } catch (e) {
+    console.warn(`[Skyline] Secondary HTTP send failed:`, (e as Error).message)
+  }
+
+  // Optional SMPP fallback (only if HTTP fails)
   try {
     await sendSmsSMPP(config, phone, msg)
     return {
       success: true,
       messageId: `smpp_${Date.now()}`,
-      port: stickyPort || undefined,
+      port: targetPort,
       method: 'smpp',
     }
   } catch (e) {
     return {
       success: false,
-      error: (e as Error).message || 'SMS send failed (HTTP + SMPP both failed)',
-      port: stickyPort,
+      error: (e as Error).message || 'SMS send failed on all SIM Box ports.',
+      port: targetPort,
     }
   }
 }

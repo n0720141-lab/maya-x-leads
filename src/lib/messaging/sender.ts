@@ -169,11 +169,23 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
       const { db } = await import('@/lib/db')
       let emailChannels = await db.channel.findMany({ where: { type: 'email', status: 'connected' } })
       
-      let lastErr = 'Email config not provided'
-      for (const emailCh of emailChannels) {
-        if (!emailCh.credentials) continue
+      const targetConfigs: EmailConfig[] = []
+      if (opts.emailConfig) {
+        targetConfigs.push(opts.emailConfig)
+      }
+
+      for (const ch of emailChannels) {
+        if (ch.credentials) {
+          try {
+            const parsed = JSON.parse(ch.credentials)
+            targetConfigs.push(parsed)
+          } catch {}
+        }
+      }
+
+      let lastErr = 'No connected Gmail/SMTP account found on Channels page.'
+      for (const cfg of targetConfigs) {
         try {
-          const cfg = JSON.parse(emailCh.credentials)
           const result = await sendEmail(cfg, {
             to: opts.to,
             subject: opts.emailPayload?.subject || 'Message from MayaX',
@@ -191,10 +203,13 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
           } else {
             lastErr = result.error || 'SMTP send failed'
             if (lastErr.includes('550') || lastErr.toLowerCase().includes('limit')) {
-              await db.channel.update({
-                where: { id: emailCh.id },
-                data: { status: 'limit_reached' },
-              }).catch(() => {})
+              const userEmail = cfg.user || (cfg as any).email
+              if (userEmail) {
+                await db.channel.updateMany({
+                  where: { type: 'email', credentials: { contains: userEmail } },
+                  data: { status: 'limit_reached' },
+                }).catch(() => {})
+              }
             }
           }
         } catch (err) {

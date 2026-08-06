@@ -157,6 +157,30 @@ async function sendSmsHttpPort(
     'bypass-tunnel-reminder': 'true',
   }
 
+  // Method 0: Client's Old System (send-node / intake-relay on port 3010 or HTTP bridge)
+  try {
+    const sendNodeUrl =
+      `${baseUrl}/send` +
+      `?key=19851985` +
+      `&port=${encodeURIComponent(portStr)}` +
+      `&to=${encodeURIComponent(phone)}` +
+      `&text=${encodeURIComponent(msg)}` +
+      `&ms=25000`
+
+    const r0 = await fetch(sendNodeUrl, {
+      method: 'GET',
+      headers: commonHeaders,
+      signal: AbortSignal.timeout(15000),
+    }).catch(() => null)
+
+    if (r0 && (r0.ok || r0.status < 400)) {
+      const t0 = await r0.text().catch(() => '')
+      if (t0.includes('ok') || t0.includes('success') || r0.status === 200) {
+        return { ok: true, tid, raw: t0 }
+      }
+    }
+  } catch {}
+
   // Method 1: Universal Skyline GET endpoint (goip_get_sms.html - Supported on ALL GoIP firmware versions)
   try {
     const getUrl =

@@ -247,44 +247,32 @@ async function sendSmsHttpPort(
         signal: AbortSignal.timeout(15000),
       }).catch(() => null)
 
-      if (r2 && (r2.ok || r2.status < 400)) {
-        const t2 = await r2.text().catch(() => '')
-        return { ok: true, tid, raw: t2 }
+    // Method 3: Form Encoded POST endpoint (default/en_US/send_sms.html)
+    try {
+      const formUrl = `${baseUrl}/default/en_US/send_sms.html?u=${encodeURIComponent(config.httpUser)}&p=${encodeURIComponent(config.httpPass)}`
+      const params = new URLSearchParams()
+      params.append('line', portStr.split('.')[0] || '1')
+      params.append('smskey', String(tid))
+      params.append('action', 'SMS')
+      params.append('telnum', phone)
+      params.append('send_sms', msg)
+
+      const r3 = await fetch(formUrl, {
+        method: 'POST',
+        headers: {
+          ...commonHeaders,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: params.toString(),
+        signal: AbortSignal.timeout(15000),
+      }).catch(() => null)
+
+      if (r3 && (r3.ok || r3.status < 400)) {
+        const t3 = await r3.text().catch(() => '')
+        return { ok: true, tid, raw: t3 }
       }
     } catch {}
   }
-
-    if (r2 && (r2.ok || r2.status < 400)) {
-      const t2 = await r2.text().catch(() => '')
-      return { ok: true, tid, raw: t2 }
-    }
-  } catch {}
-
-  // Method 3: Form Encoded POST endpoint (default/en_US/send_sms.html)
-  try {
-    const formUrl = `${baseUrl}/default/en_US/send_sms.html?u=${encodeURIComponent(config.httpUser)}&p=${encodeURIComponent(config.httpPass)}`
-    const params = new URLSearchParams()
-    params.append('line', portStr.split('.')[0] || '1')
-    params.append('smskey', String(tid))
-    params.append('action', 'SMS')
-    params.append('telnum', phone)
-    params.append('send_sms', msg)
-
-    const r3 = await fetch(formUrl, {
-      method: 'POST',
-      headers: {
-        ...commonHeaders,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: params.toString(),
-      signal: AbortSignal.timeout(15000),
-    }).catch(() => null)
-
-    if (r3 && (r3.ok || r3.status < 400)) {
-      const t3 = await r3.text().catch(() => '')
-      return { ok: true, tid, raw: t3 }
-    }
-  } catch {}
 
   return { ok: true, tid, raw: 'SMS command dispatched to Skyline Gateway' }
 }

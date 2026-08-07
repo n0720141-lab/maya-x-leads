@@ -143,187 +143,63 @@ async function sendSmsHttpPort(
   fromPort: string,
 ): Promise<{ ok: boolean; tid: number; raw?: string }> {
   const baseUrl = getBaseUrl(config)
-  const authHeader = 'Basic ' + Buffer.from(`${config.httpUser}:${config.httpPass}`).toString('base64')
-  const tid = Date.now()
+  const user = encodeURIComponent(config.httpUser || 'root')
+  const pass = encodeURIComponent(config.httpPass || 'Sign4321$')
+  const url = `${baseUrl}/goip_post_sms.html?username=${user}&password=${pass}&version=1.1`
 
-  const rawDigits = String(to || '').replace(/[^\d]/g, '')
-  const local10Phone = rawDigits.length >= 10 ? rawDigits.slice(-10) : rawDigits
-  const full11Phone = rawDigits.length === 10 ? '1' + rawDigits : (rawDigits.length >= 11 ? rawDigits.slice(-11) : rawDigits)
+  const tid = Date.now() + Math.floor(Math.random() * 1000)
+  const targetPort = (fromPort && String(fromPort).trim()) || '1.01'
+  const normalizedPhone = normalizePhone(to)
 
-  const msg = String(text || '').trim()
-  const portStr = String(fromPort || '1.01').trim()
-
-  const commonHeaders = {
-    'Authorization': authHeader,
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-    'X-Pinggy-No-Page': 'true',
-    'Bypass-Tunnel-Reminder': 'true',
-    'bypass-tunnel-reminder': 'true',
+  const body = {
+    type: 'send-sms',
+    task_num: 1,
+    tasks: [
+      {
+        tid,
+        from: targetPort,
+        to: normalizedPhone,
+        sms: String(text || '').slice(0, 1000),
+        chs: 'utf8',
+        coding: 0,
+      },
+    ],
   }
 
-  // Helper to test all target numbers (both 10-digit local e.g. 4165551234 and 11-digit national e.g. 14165551234)
-  const targetPhones = Array.from(new Set([local10Phone, full11Phone, `+${full11Phone}`])).filter(Boolean)
+  const authHeader = 'Basic ' + Buffer.from(`${config.httpUser || 'root'}:${config.httpPass || 'Sign4321$'}`).toString('base64')
 
-  for (const phone of targetPhones) {
-    // Method 0: Client's Old System (send-node / intake-relay on port 3010 or HTTP bridge)
-    try {
-      const sendNodeUrl =
-        `${baseUrl}/send` +
-        `?key=19851985` +
-        `&port=${encodeURIComponent(portStr)}` +
-        `&to=${encodeURIComponent(phone)}` +
-        `&text=${encodeURIComponent(msg)}` +
-        `&ms=25000`
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': authHeader,
+      'Content-Type': 'application/json;charset=utf-8',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      'X-Pinggy-No-Page': 'true',
+      'Bypass-Tunnel-Reminder': 'true',
+      'bypass-tunnel-reminder': 'true',
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15000),
+  })
 
-      const r0 = await fetch(sendNodeUrl, {
-        method: 'GET',
-        headers: commonHeaders,
-        signal: AbortSignal.timeout(15000),
-      }).catch(() => null)
-
-      if (r0 && (r0.ok || r0.status < 400)) {
-        const t0 = await r0.text().catch(() => '')
-        if (t0.includes('ok') || t0.includes('success') || r0.status === 200) {
-          return { ok: true, tid, raw: t0 }
-        }
-      }
-    } catch {}
-
-    // Method 1: Universal Skyline GET endpoint (goip_get_sms.html)
-    try {
-      const getUrl =
-        `${baseUrl}/goip_get_sms.html` +
-        `?username=${encodeURIComponent(config.httpUser)}` +
-        `&password=${encodeURIComponent(config.httpPass)}` +
-        `&to=${encodeURIComponent(phone)}` +
-        `&sms=${encodeURIComponent(msg)}` +
-        `&from=${encodeURIComponent(portStr)}` +
-        `&tid=${tid}`
-
-      const r1 = await fetch(getUrl, {
-        method: 'GET',
-        headers: commonHeaders,
-        signal: AbortSignal.timeout(15000),
-      }).catch(() => null)
-
-      if (r1 && (r1.ok || r1.status < 400)) {
-        const t1 = await r1.text().catch(() => '')
-        if (!t1.toLowerCase().includes('error') || t1.toLowerCase().includes('success') || t1.toLowerCase().includes('ok')) {
-          return { ok: true, tid, raw: t1 }
-        }
-      }
-    } catch {}
-
-    // Method 2: JSON POST endpoint (goip_post_sms.html)
-    try {
-      const postUrl =
-        `${baseUrl}/goip_post_sms.html` +
-        `?username=${encodeURIComponent(config.httpUser)}` +
-        `&password=${encodeURIComponent(config.httpPass)}` +
-        `&version=1.1`
-
-      const body = {
-        type: 'send-sms',
-        task_num: 1,
-        tasks: [
-          {
-            tid,
-            from: portStr,
-            to: phone,
-            sms: msg,
-            chs: 'utf8',
-            coding: 0,
-          },
-        ],
-      }
-
-      const r2 = await fetch(postUrl, {
-        method: 'POST',
-        headers: {
-          ...commonHeaders,
-          'Content-Type': 'application/json;charset=utf-8',
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(15000),
-      }).catch(() => null)
-
-    // Method 3: Form Encoded POST endpoint (default/en_US/send_sms.html)
-    try {
-      const formUrl = `${baseUrl}/default/en_US/send_sms.html?u=${encodeURIComponent(config.httpUser)}&p=${encodeURIComponent(config.httpPass)}`
-      const params = new URLSearchParams()
-      params.append('line', portStr.split('.')[0] || '1')
-      params.append('smskey', String(tid))
-      params.append('action', 'SMS')
-      params.append('telnum', phone)
-      params.append('send_sms', msg)
-
-      const r3 = await fetch(formUrl, {
-        method: 'POST',
-        headers: {
-          ...commonHeaders,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: params.toString(),
-        signal: AbortSignal.timeout(15000),
-      }).catch(() => null)
-
-      if (r3 && (r3.ok || r3.status < 400)) {
-        const t3 = await r3.text().catch(() => '')
-        return { ok: true, tid, raw: t3 }
-      }
-    } catch {}
+  const txt = await r.text().catch(() => '')
+  if (!r.ok) {
+    throw new Error(`Skyline HTTP ${r.status}: ${txt.slice(0, 140)}`)
   }
 
-  return { ok: true, tid, raw: 'SMS command dispatched to Skyline Gateway' }
-}
-
-// ==================== SEND-NODE CONTROL (OPTIONAL) ====================
-// If user is running the old send-node (port 3010), use it for port-hold + force-switch
-// Otherwise skip — direct HTTP send to Skyline works fine
-async function sendViaSendNode(
-  sendNodeBase: string,
-  secret: string,
-  to: string,
-  text: string,
-  fromPort: string,
-  holdMs: number = 25000,
-): Promise<{ ok: boolean; error?: string }> {
-  const url =
-    `${sendNodeBase}/send` +
-    `?key=${encodeURIComponent(secret)}` +
-    `&port=${encodeURIComponent(fromPort)}` +
-    `&to=${encodeURIComponent(normalizePhone(to))}` +
-    `&text=${encodeURIComponent(String(text || ''))}` +
-    `&ms=${encodeURIComponent(String(holdMs))}`
-
-  const r = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) })
-  const t = await r.text().catch(() => '')
-  if (!r.ok) throw new Error('send-node /send HTTP ' + r.status + ' ' + t.slice(0, 160))
-
-  let j: any = null
-  try { j = JSON.parse(t) } catch {}
-  if (!j || !j.ok) throw new Error('send-node /send failed: ' + (j?.error || t.slice(0, 160)))
-
-  return { ok: true }
+  return { ok: true, tid, raw: txt }
 }
 
 // ==================== MAIN SEND FUNCTION ====================
 /**
  * Send SMS via Skyline SIM Box
- *
- * Logic (ported from intake-relay.js):
- * 1. If stickyPort provided → try HTTP send to that exact port
- * 2. If that fails → fallback to SMPP send
- * 3. If no stickyPort → use SMPP directly
- *
- * Returns success with method used (http/smpp) and port
+ * Direct mirror of Ali's working send.js algorithm
  */
 export async function sendSkylineSms(
   config: SkylineConfig,
   to: string,
   message: string,
   stickyPort?: string,
-  sendNodeConfig?: { baseUrl: string; secret: string },
 ): Promise<SendSmsResult> {
   const phone = normalizePhone(to)
   if (!phone) {
@@ -335,64 +211,21 @@ export async function sendSkylineSms(
     return { success: false, error: 'Empty message' }
   }
 
-  // Primary HTTP send to Skyline GoIP (handles both sticky port and auto SIM selection)
-  const targetPort = (stickyPort && String(stickyPort).trim()) || '1.01'
+  const port = (stickyPort && String(stickyPort).trim()) || '1.01'
 
-  // Try send-node first if configured
-  if (sendNodeConfig) {
-    try {
-      await sendViaSendNode(sendNodeConfig.baseUrl, sendNodeConfig.secret, phone, msg, targetPort)
-      return {
-        success: true,
-        messageId: `sn_${Date.now()}`,
-        port: targetPort,
-        method: 'send_node',
-      }
-    } catch (e) {
-      console.warn(`[Skyline] send-node failed, trying direct HTTP:`, (e as Error).message)
-    }
-  }
-
-  // Direct HTTP send to Skyline GoIP Endpoint
   try {
-    const result = await sendSmsHttpPort(config, phone, msg, targetPort)
+    const result = await sendSmsHttpPort(config, phone, msg, port)
     return {
       success: true,
       messageId: `http_${result.tid}`,
-      port: targetPort,
+      port,
       method: 'http',
-    }
-  } catch (e) {
-    console.warn(`[Skyline] Primary HTTP send to port ${targetPort} failed:`, (e as Error).message)
-  }
-
-  // Secondary HTTP fallback to port "1"
-  try {
-    const result = await sendSmsHttpPort(config, phone, msg, '1')
-    return {
-      success: true,
-      messageId: `http_${result.tid}`,
-      port: '1',
-      method: 'http',
-    }
-  } catch (e) {
-    console.warn(`[Skyline] Secondary HTTP send failed:`, (e as Error).message)
-  }
-
-  // Optional SMPP fallback (only if HTTP fails)
-  try {
-    await sendSmsSMPP(config, phone, msg)
-    return {
-      success: true,
-      messageId: `smpp_${Date.now()}`,
-      port: targetPort,
-      method: 'smpp',
     }
   } catch (e) {
     return {
       success: false,
-      error: (e as Error).message || 'SMS send failed on all SIM Box ports.',
-      port: targetPort,
+      error: (e as Error).message || 'SMS send failed',
+      port,
     }
   }
 }

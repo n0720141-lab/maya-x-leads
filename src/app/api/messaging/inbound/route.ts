@@ -76,10 +76,15 @@ export async function POST(req: NextRequest) {
     })
 
     if (!lead) {
-      return NextResponse.json({
-        success: true,
-        autoReplied: false,
-        reason: 'Sender not found in imported leads list. Auto-creation disabled.'
+      lead = await db.lead.create({
+        data: {
+          tenantId,
+          name: senderIdentifier.includes('@') ? senderIdentifier.split('@')[0] : 'Inbound Lead',
+          phone: channel === 'sms' ? senderIdentifier : 'N/A',
+          email: channel === 'email' ? senderIdentifier : undefined,
+          status: 'replied',
+          port: fromPort || undefined,
+        }
       })
     } else {
       if (fromPort && lead.port !== fromPort) {
@@ -132,7 +137,7 @@ export async function POST(req: NextRequest) {
 
     if (autoReplyRes.success && autoReplyRes.replyText) {
       const replyText = autoReplyRes.replyText
-      const replyChannel = channel === 'email' ? 'email' : (conversation.activeChannel || 'whatsapp')
+      const replyChannel = channel
 
       // Append outbound auto-reply to conversation
       existingMsgs.push({
@@ -151,7 +156,7 @@ export async function POST(req: NextRequest) {
         }
       })
 
-      // Dispatch auto-reply INSTANTLY to target channel with exact In-Reply-To thread headers
+      // Dispatch auto-reply INSTANTLY to target channel
       if (replyChannel === 'email' && lead.email) {
         const defaultSubjectData = generateHumanEmailPayload(lead.name || '')
         const replySubject = rawSubject
@@ -169,14 +174,15 @@ export async function POST(req: NextRequest) {
             inReplyTo: messageId || undefined,
             references: references || messageId || undefined,
           },
-          settings: { messageDelayMinMs: 8000, messageDelayMaxMs: 18000 }
+          settings: { messageDelayMinMs: 0, messageDelayMaxMs: 0 }
         }).catch((err) => console.error('Email auto-reply dispatch error:', err))
       } else if (replyChannel === 'sms' && lead.phone) {
         await sendMessage({
           channel: 'sms',
           to: lead.phone,
           message: replyText,
-          settings: { messageDelayMinMs: 8000, messageDelayMaxMs: 18000 }
+          stickyPort: fromPort || lead.port || undefined,
+          settings: { messageDelayMinMs: 0, messageDelayMaxMs: 0 }
         }).catch((err) => console.error('SMS auto-reply dispatch error:', err))
       }
 

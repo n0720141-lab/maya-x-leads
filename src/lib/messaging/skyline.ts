@@ -212,7 +212,47 @@ export async function sendSkylineSms(
   }
 
   const port = (stickyPort && String(stickyPort).trim()) || '1.01'
+  const baseUrl = getBaseUrl(config)
 
+  // Method 1: Try send-node /send endpoint first (for Ali's local send.js engine on port 3010)
+  try {
+    const sendNodeUrl =
+      `${baseUrl}/send` +
+      `?key=19851985` +
+      `&port=${encodeURIComponent(port)}` +
+      `&to=${encodeURIComponent(phone)}` +
+      `&text=${encodeURIComponent(msg)}` +
+      `&ms=25000`
+
+    const r0 = await fetch(sendNodeUrl, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'X-Pinggy-No-Page': 'true',
+        'bypass-tunnel-reminder': 'true',
+        'Bypass-Tunnel-Reminder': 'true',
+      },
+      signal: AbortSignal.timeout(15000),
+    }).catch(() => null)
+
+    if (r0 && (r0.ok || r0.status < 400)) {
+      const t0 = await r0.text().catch(() => '')
+      let j: any = null
+      try { j = JSON.parse(t0) } catch {}
+      if (t0.includes('ok') || t0.includes('success') || (j && j.ok) || r0.status === 200) {
+        return {
+          success: true,
+          messageId: `sn_${Date.now()}`,
+          port,
+          method: 'send_node',
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[Skyline] send-node /send failed, falling back to direct HTTP:', e)
+  }
+
+  // Method 2: Direct HTTP send to Skyline GoIP (port 80 / goip_post_sms.html)
   try {
     const result = await sendSmsHttpPort(config, phone, msg, port)
     return {

@@ -134,6 +134,20 @@ async function sendSmsSMPP(config: SkylineConfig, to: string, text: string): Pro
   })
 }
 
+function parseTaskStatus(respText: string): { ok: boolean; raw: string; code: number | null } {
+  try {
+    const j = JSON.parse(respText)
+    const st = j && Array.isArray(j.status) ? j.status[0] : null
+    const raw = st ? String(st.status || '') : ''
+    const code = parseInt(raw.split(/\s+/)[0], 10)
+    const ok = Number.isFinite(code) && code === 0 && /success|ok|accepted/i.test(raw)
+    return { ok, raw, code: Number.isFinite(code) ? code : null }
+  } catch (_) {
+    const isOk = /success|ok|accepted/i.test(respText)
+    return { ok: isOk, raw: String(respText || '').slice(0, 160), code: isOk ? 0 : null }
+  }
+}
+
 // ==================== SKYLINE HTTP API (PRIMARY) ====================
 // Ported exactly from intake-relay.js — uses goip_post_sms.html endpoint
 async function sendSmsHttpPort(
@@ -141,7 +155,7 @@ async function sendSmsHttpPort(
   to: string,
   text: string,
   fromPort: string,
-): Promise<{ ok: boolean; tid: number; raw?: string }> {
+): Promise<{ ok: boolean; tid: number; port: string; raw?: string }> {
   const baseUrl = getBaseUrl(config)
   const user = encodeURIComponent(config.httpUser || 'root')
   const pass = encodeURIComponent(config.httpPass || 'Sign4321$')
@@ -150,44 +164,64 @@ async function sendSmsHttpPort(
   const tid = Date.now() + Math.floor(Math.random() * 1000)
   const targetPort = (fromPort && String(fromPort).trim()) || '1.01'
   const normalizedPhone = normalizePhone(to)
-
-  const body = {
-    type: 'send-sms',
-    task_num: 1,
-    tasks: [
-      {
-        tid,
-        from: targetPort,
-        to: normalizedPhone,
-        sms: String(text || '').slice(0, 1000),
-        chs: 'utf8',
-        coding: 0,
-      },
-    ],
-  }
-
   const authHeader = 'Basic ' + Buffer.from(`${config.httpUser || 'root'}:${config.httpPass || 'Sign4321$'}`).toString('base64')
 
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': authHeader,
-      'Content-Type': 'application/json;charset=utf-8',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-      'X-Pinggy-No-Page': 'true',
-      'Bypass-Tunnel-Reminder': 'true',
-      'bypass-tunnel-reminder': 'true',
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(15000),
-  })
+  // Candidate SIM ports across boards (primary requested port first, then rotation across inserted slots)
+  const candidatePorts = Array.from(new Set([
+    targetPort,
+    '1.01', '1.02', '1.03',
+    '2.01', '2.02', '2.03',
+    '3.01', '4.01', '5.01', '6.01',
+    '27.01', '29.01', '0'
+  ]))
 
-  const txt = await r.text().catch(() => '')
-  if (!r.ok) {
-    throw new Error(`Skyline HTTP ${r.status}: ${txt.slice(0, 140)}`)
+  let lastRaw = ''
+
+  for (const portAttempt of candidatePorts) {
+    const body = {
+      type: 'send-sms',
+      task_num: 1,
+      tasks: [
+        {
+          tid,
+          from: portAttempt,
+          to: normalizedPhone,
+          sms: String(text || '').slice(0, 1000),
+          chs: 'utf8',
+          coding: 0,
+        },
+      ],
+    }
+
+    try {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': authHeader,
+          'Content-Type': 'application/json;charset=utf-8',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+          'X-Pinggy-No-Page': 'true',
+          'Bypass-Tunnel-Reminder': 'true',
+          'bypass-tunnel-reminder': 'true',
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(10000),
+      })
+
+      const txt = await r.text().catch(() => '')
+      lastRaw = txt
+      if (r.ok) {
+        const parsed = parseTaskStatus(txt)
+        if (parsed.ok) {
+          return { ok: true, tid, port: portAttempt, raw: txt }
+        }
+      }
+    } catch (e) {
+      lastRaw = (e as Error).message
+    }
   }
 
-  return { ok: true, tid, raw: txt }
+  throw new Error(`Skyline hardware returned error on all SIM slots. Last response: ${lastRaw.slice(0, 140)}`)
 }
 
 // ==================== MAIN SEND FUNCTION ====================

@@ -33,6 +33,36 @@ function isStopOrNotInterested(text: string): boolean {
   return false
 }
 
+function isVehicleLike(msg: string): boolean {
+  const s = String(msg || '').trim()
+  if (!s) return false
+  if (/\b(looking for|want|need|interested in|maybe a|maybe an)\b/i.test(s)) return true
+  if (/\b(car|cars|vehicle|vehicles|truck|trucks|suv|suvs|van|vans|sedan|sedans|coupe|pickup|minivan)\b/i.test(s)) return true
+  if (/\b(?:19|20)\d{2}\s+[A-Za-z0-9]+(?:\s+[A-Za-z0-9]+){0,3}\b/i.test(s)) return true
+  if (/\b(?:20|21|22|23|24|25|18|17|19)\s+[A-Za-z0-9]+/i.test(s)) return true
+  if (/\b(civic|corolla|camry|accord|crv|cr-v|rav4|rogue|sentra|altima|tucson|elantra|caravan|escape|explorer|f150|f-150|ram|silverado|malibu|sonata|santa fe|santafe|pilot|passport|mazda|cx-5|cx5|cx-9|cx9)\b/i.test(s)) return true
+  return false
+}
+
+function isIncomeLike(msg: string): boolean {
+  const s = String(msg || '').trim().toLowerCase()
+  if (!s) return false
+
+  // A car description like "2020 civic" or "20 civic" is a vehicle, NOT income!
+  if (isVehicleLike(msg)) return false
+
+  // Pure vehicle year (1990-2029) is NOT income
+  const digitsOnly = s.replace(/[^\d]/g, '')
+  if (/^(19|20)\d{2}$/.test(digitsOnly) && !s.includes('month') && !s.includes('$') && !s.includes('k')) {
+    return false
+  }
+
+  if (/\b(income|salary|make|earn|bring home|gross|net|monthly|biweekly|weekly|per hour|hourly|paycheck|pay cheque|paycheque)\b/i.test(s) && /\d/.test(s)) return true
+  if (/\$?\s*\d{3,6}(?:\s*(?:monthly|month|weekly|week|biweekly|bi-weekly|hourly|hr|\/mo|\/month))\b/i.test(s)) return true
+  if (/^\$?\s*\d{3,5}\s*(?:k)?$/i.test(s) && !/^(19|20)\d{2}$/.test(s)) return true
+  return false
+}
+
 /**
  * 100% Exact Old System (intake-relay.js) Auto-Reply Engine
  * Multi-channel: Dispatches Auto-Replies over WhatsApp, Email, or SIM Box SMS

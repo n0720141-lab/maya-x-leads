@@ -8,7 +8,7 @@ import { generateHumanEmailPayload } from '@/lib/messaging/templates'
  * POST /api/messaging/inbound
  * Generic inbound webhook endpoint for SMS and Email replies with instant multi-channel auto-reply dispatch
  */
-async function handleInboundPayload(payload: {
+export async function handleInboundPayload(payload: {
   rawPhone?: string
   rawEmail?: string
   content?: string

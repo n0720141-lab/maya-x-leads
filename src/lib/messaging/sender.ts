@@ -95,15 +95,38 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
 
   switch (opts.channel) {
     case 'sms': {
-      const targetSkylineConfig = opts.skylineConfig || {
-        host: process.env.SKYLINE_HOST || "192.168.1.16",
-        httpPort: parseInt(process.env.SKYLINE_HTTP_PORT || "80", 10),
-        httpUser: process.env.SKYLINE_HTTP_USER || "root",
-        httpPass: process.env.SKYLINE_HTTP_PASS || "Sign4321$",
-        smppPort: parseInt(process.env.SKYLINE_SMPP_PORT || "20002", 10),
-        smppUser: process.env.SKYLINE_SMPP_USER || "leadsminer_in",
-        smppPass: process.env.SKYLINE_SMPP_PASS || "Sign4321",
-      };
+      let targetSkylineConfig = opts.skylineConfig
+
+      if (!targetSkylineConfig) {
+        try {
+          const { db } = await import('@/lib/db')
+          const smsChannel = await db.channel.findFirst({ where: { type: 'sms', status: 'connected' } })
+          if (smsChannel?.credentials) {
+            const parsed = JSON.parse(smsChannel.credentials)
+            targetSkylineConfig = {
+              host: parsed.host || process.env.SKYLINE_HOST || '192.168.1.16',
+              httpPort: parsed.httpPort || 80,
+              httpUser: parsed.httpUser || 'root',
+              httpPass: parsed.httpPass || 'Sign4321$',
+              smppPort: parsed.smppPort || 20002,
+              smppUser: parsed.smppUser || 'leadsminer_in',
+              smppPass: parsed.smppPass || 'Sign4321',
+            }
+          }
+        } catch {}
+      }
+
+      if (!targetSkylineConfig) {
+        targetSkylineConfig = {
+          host: process.env.SKYLINE_HOST || '192.168.1.16',
+          httpPort: parseInt(process.env.SKYLINE_HTTP_PORT || '80', 10),
+          httpUser: process.env.SKYLINE_HTTP_USER || 'root',
+          httpPass: process.env.SKYLINE_HTTP_PASS || 'Sign4321$',
+          smppPort: parseInt(process.env.SKYLINE_SMPP_PORT || '20002', 10),
+          smppUser: process.env.SKYLINE_SMPP_USER || 'leadsminer_in',
+          smppPass: process.env.SKYLINE_SMPP_PASS || 'Sign4321',
+        }
+      }
       // Hold port for sticky reply (only if send-node is configured)
       if (opts.stickyPort && settings.sendNodeControlBase) {
         await holdPort(

@@ -202,16 +202,59 @@ async function handleInboundPayload(payload: {
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}))
+    let rawPhone: string | undefined
+    let rawEmail: string | undefined
+    let content: string | undefined
+    let fromPort: string | undefined
+    let rawSubject: string | undefined
+    let messageId: string | undefined
+    let references: string | undefined
+    let channel: string | undefined
+
+    const contentType = req.headers.get('content-type') || ''
+    const rawText = await req.text().catch(() => '')
+
+    if (contentType.includes('application/json') || rawText.trim().startsWith('{')) {
+      try {
+        const body = JSON.parse(rawText)
+        rawPhone = body.phone || body.src_num || body.from || body.src || body.sender
+        rawEmail = body.email
+        content = body.content || body.msg || body.sms || body.text
+        fromPort = body.fromPort || body.port || body.receiver
+        rawSubject = body.subject
+        messageId = body.messageId
+        references = body.references
+        channel = body.channel
+      } catch (_) {}
+    } else if (contentType.includes('application/x-www-form-urlencoded') || contentType.includes('multipart/form-data')) {
+      try {
+        const params = new URLSearchParams(rawText)
+        rawPhone = params.get('src_num') || params.get('phone') || params.get('from') || undefined
+        rawEmail = params.get('email') || undefined
+        content = params.get('msg') || params.get('sms') || params.get('text') || params.get('content') || undefined
+        fromPort = params.get('receiver') || params.get('port') || params.get('fromPort') || undefined
+        rawSubject = params.get('subject') || undefined
+        channel = params.get('channel') || undefined
+      } catch (_) {}
+    }
+
+    // Fallback parser using parseSkylineInbound for multi-line raw text
+    if ((!rawPhone || !content) && rawText) {
+      const parsed = parseSkylineInbound(rawText)
+      if (parsed.phone) rawPhone = parsed.phone
+      if (parsed.message) content = parsed.message
+      if (parsed.port) fromPort = parsed.port
+    }
+
     return handleInboundPayload({
-      rawPhone: body.phone || body.src_num || body.from,
-      rawEmail: body.email,
-      content: body.content || body.msg || body.sms || body.text,
-      fromPort: body.fromPort || body.port || body.receiver,
-      rawSubject: body.subject,
-      messageId: body.messageId,
-      references: body.references,
-      channel: body.channel,
+      rawPhone,
+      rawEmail,
+      content,
+      fromPort,
+      rawSubject,
+      messageId,
+      references,
+      channel,
     })
   } catch (error) {
     console.error('Inbound POST route error:', error)
@@ -226,7 +269,7 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = req.nextUrl
     return handleInboundPayload({
-      rawPhone: searchParams.get('src_num') || searchParams.get('phone') || searchParams.get('from') || undefined,
+      rawPhone: searchParams.get('src_num') || searchParams.get('phone') || searchParams.get('from') || searchParams.get('sender') || undefined,
       rawEmail: searchParams.get('email') || undefined,
       content: searchParams.get('msg') || searchParams.get('sms') || searchParams.get('text') || searchParams.get('content') || undefined,
       fromPort: searchParams.get('receiver') || searchParams.get('port') || searchParams.get('fromPort') || undefined,

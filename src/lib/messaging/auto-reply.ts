@@ -95,25 +95,49 @@ export async function processInboundAutoReply(params: InboundMessageParams): Pro
     timestamp: new Date().toISOString()
   })
 
-  // 4. Generate Intent-Aware Auto-Reply
-  const currentState = conv.state || 'IDLE'
+  // 4. Generate Step-by-Step Intent-Aware Auto-Reply
+  const currentState = conv.state || 'ASK_VEHICLE'
   const fn = leadFirstName(lead.name)
   const lowerMsg = text.toLowerCase().trim()
   let aiReplyText = ''
   let nextState = currentState
 
   let currentVehicle = ''
+  let currentIncome = ''
   try {
     const parsedAns = JSON.parse(lead.answers || '{}')
     currentVehicle = parsedAns.vehicle || ''
+    currentIncome = parsedAns.income || ''
+  } catch {}
+
+  // Detect vehicle in message
+  if (isVehicleLike(text) && !isQuestionLike(text)) {
+    currentVehicle = text.trim()
+  }
+
+  // Detect income in message
+  if (isIncomeLike(text)) {
+    const incomeMatch = text.match(/\$?\d{3,6}/)
+    currentIncome = incomeMatch ? incomeMatch[0] : text.trim()
+  }
+
+  // Save updated answers to lead
+  try {
+    const updatedAns: Record<string, string> = {}
+    if (currentVehicle) updatedAns.vehicle = currentVehicle
+    if (currentIncome) updatedAns.income = currentIncome
+    await db.lead.update({
+      where: { id: lead.id },
+      data: { answers: JSON.stringify(updatedAns), status: 'replied' }
+    })
   } catch {}
 
   // Intent A: Location / Address inquiry
   if (lowerMsg.includes('location') || lowerMsg.includes('address') || lowerMsg.includes('where are you') || lowerMsg.includes('where is your office')) {
     aiReplyText = fn
-      ? `Hi ${fn}, our main showroom is at 4500 Oak Street with nationwide delivery across Canada. What vehicle are you shopping for?`
-      : `Our main showroom is located at 4500 Oak Street with nationwide delivery. What vehicle are you shopping for?`
-    nextState = 'ASK_VEHICLE'
+      ? `Hi ${fn}, our main showroom is at 4500 Oak Street with nationwide delivery across Canada. What vehicle or monthly budget are you looking for?`
+      : `Our main showroom is located at 4500 Oak Street with nationwide delivery. What vehicle or monthly budget are you looking for?`
+    nextState = currentVehicle ? 'ASK_INCOME' : 'ASK_VEHICLE'
   }
   // Intent B: Credit / Bankruptcy / Approval inquiry
   else if (lowerMsg.includes('bad credit') || lowerMsg.includes('bankruptcy') || lowerMsg.includes('credit score') || lowerMsg.includes('rate') || lowerMsg.includes('new to canada')) {
@@ -122,46 +146,26 @@ export async function processInboundAutoReply(params: InboundMessageParams): Pro
       : `No problem at all — we work with top lenders to get approvals for all credit types! What is your estimated gross monthly income?`
     nextState = 'ASK_INCOME'
   }
-  // Intent C: Income specified or numbers provided
-  else if (/\$?\d{3,6}/.test(lowerMsg) || lowerMsg.includes('month') || lowerMsg.includes('income') || lowerMsg.includes('salary') || currentState === 'ASK_INCOME') {
-    const incomeMatch = lowerMsg.match(/\$?\d{3,6}/)
-    const income = incomeMatch ? incomeMatch[0] : text.trim()
-    try {
-      const existingAns = JSON.parse(lead.answers || '{}')
-      existingAns.income = income
-      await db.lead.update({
-        where: { id: lead.id },
-        data: { answers: JSON.stringify(existingAns) }
-      })
-    } catch {}
-
+  // STEP 2: Lead provided Income AND we already have Vehicle -> FINAL PRE-APPROVAL HANDOFF!
+  else if (currentIncome && (currentState === 'ASK_INCOME' || isIncomeLike(text))) {
     aiReplyText = fn
       ? `Thank you ${fn} — You are Pre-Approved for up to $50,000!\n\nOur finance coordinator Ayesha will contact you shortly to go over your vehicle options and complete the approval.\n\nKindly save her contact and expect her call from:\n437-535-3576`
       : `You are Pre-Approved for up to $50,000!\n\nOur finance coordinator Ayesha will contact you shortly to go over your vehicle options and complete the approval.\n\nKindly save her contact and expect her call from:\n437-535-3576`
     nextState = 'QUALIFIED'
   }
-  // Intent D: Vehicle specified
+  // STEP 1: Lead provided Vehicle (e.g., "20 civic") -> ASK FOR INCOME NEXT!
+  else if (currentVehicle || isVehicleLike(text)) {
+    const vName = currentVehicle || text.trim()
+    aiReplyText = fn
+      ? `Nice choice ${fn}! To get you approved for the ${vName}, what is your estimated gross monthly income (or weekly pay)?`
+      : `Nice choice! To get you approved for the ${vName}, what is your estimated gross monthly income (or weekly pay)?`
+    nextState = 'ASK_INCOME'
+  }
+  // Fallback: Ask for vehicle or income
   else {
-    const vehicle = text.trim()
-    if (vehicle && vehicle.length > 2) {
-      currentVehicle = vehicle
-      try {
-        await db.lead.update({
-          where: { id: lead.id },
-          data: { answers: JSON.stringify({ vehicle: currentVehicle }) }
-        })
-      } catch {}
-    }
-
-    if (fn && currentVehicle) {
-      aiReplyText = `Nice choice ${fn} — for the best financing option on the ${currentVehicle}, what is your gross monthly income?`
-    } else if (fn && !currentVehicle) {
-      aiReplyText = `Got it ${fn}! What vehicle are you looking to finance, and what is your estimated monthly income?`
-    } else if (!fn && currentVehicle) {
-      aiReplyText = `Nice choice — for the best financing option on the ${currentVehicle}, what is your gross monthly income?`
-    } else {
-      aiReplyText = `Hi! For the best auto financing options, what vehicle are you looking for and what is your monthly income?`
-    }
+    aiReplyText = fn
+      ? `Got it ${fn}! What vehicle are you looking to finance, and what is your estimated monthly income?`
+      : `Got it! What vehicle are you looking to finance, and what is your estimated monthly income?`
     nextState = 'ASK_INCOME'
   }
 
